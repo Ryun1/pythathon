@@ -1,0 +1,21 @@
+{
+  "name": "pythathon-offchain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "tsx src/fetch-and-verify.ts"
+  },
+  "dependencies": {
+    "@evolution-sdk/evolution": "^0.3.29",
+    "@pythnetwork/pyth-lazer-cardano-js": "^0.1.0",
+    "@pythnetwork/pyth-lazer-sdk": "^6.2.1",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/yargs": "^17.0.33",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
