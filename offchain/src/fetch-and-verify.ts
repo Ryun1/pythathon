@@ -105,25 +105,34 @@ switch (providerType) {
   }
 }
 
-// 1. Fetch the price update from Pyth Lazer in "solana" format (little-endian,
-//    Ed25519-signed -- used for both Cardano and Solana):
+// 1. Fetch price twice with a 3-second gap to detect price direction.
 const lazer = await PythLazerClient.create({
   token: LAZER_TOKEN,
   webSocketPoolConfig: {},
 });
-const latestPrice = await lazer.getLatestPrice({
-  channel: "fixed_rate@200ms",
-  formats: ["solana"],
-  parsed: true,
-  jsonBinaryEncoding: "hex",
-  priceFeedIds: [16],
-  properties: ["price", "bestBidPrice", "bestAskPrice", "exponent"],
-});
 
+const priceQuery = {
+  channel: "fixed_rate@200ms" as const,
+  formats: ["solana"] as ("solana")[],
+  parsed: true,
+  jsonBinaryEncoding: "hex" as const,
+  priceFeedIds: [16],
+  properties: ["price", "bestBidPrice", "bestAskPrice", "exponent"] as ("price" | "bestBidPrice" | "bestAskPrice" | "exponent")[],
+};
+
+const firstPrice = await lazer.getLatestPrice(priceQuery);
+const firstFeed = firstPrice.parsed?.priceFeeds?.[0];
+if (!firstFeed) throw new Error("Missing first price feed");
+const price1 = Number(firstFeed.price ?? 0) * 10 ** (firstFeed.exponent ?? 0);
+console.log(`First price:  $${price1.toFixed(8)}`);
+
+console.log("Waiting 3 seconds to sample price direction...");
+await new Promise((resolve) => setTimeout(resolve, 3000));
+
+const latestPrice = await lazer.getLatestPrice(priceQuery);
 if (!latestPrice.solana?.data) {
   throw new Error("Missing update payload");
 }
-
 const update = Buffer.from(latestPrice.solana.data, "hex");
 console.log("Fetched update bytes:", update.toString("hex"));
 
@@ -155,12 +164,15 @@ const tx = wallet
     stakeCredential: ScriptHash.fromHex(pythScript),
   });
 
-// 4. Determine price mood and generate meme, then attach as CIP-20 metadata.
+// 4. Compare prices to determine mood, then generate meme.
 const feed = latestPrice.parsed?.priceFeeds?.[0];
 if (!feed) {
-  throw new Error("Missing parsed price feed data");
+  throw new Error("Missing second price feed");
 }
 const price = Number(feed.price ?? 0) * 10 ** (feed.exponent ?? 0);
+console.log(`Second price: $${price.toFixed(8)}`);
+const priceDelta = price - price1;
+console.log(`Delta: ${priceDelta >= 0 ? "+" : ""}${priceDelta.toFixed(8)} (${priceDelta > 0 ? "UP" : priceDelta < 0 ? "DOWN" : "FLAT"})`);
 
 function memeEncode(text: string): string {
   return text
@@ -178,7 +190,7 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function getMood(price: number) {
+function getMood(price: number, delta: number) {
   const priceStr = `$${price.toFixed(2)}`;
 
   const bearishTemplates = [
@@ -232,16 +244,16 @@ function getMood(price: number) {
     { topText: "it's a bull trap", bottomText: `ADA at ${priceStr}` },
   ];
 
-  if (price < 0.251) {
+  if (delta < 0) {
     return { mood: "bearish" as const, template: pick(bearishTemplates), ...pick(bearishTexts) };
-  } else if (price <= 0.253) {
+  } else if (delta === 0) {
     return { mood: "neutral" as const, template: pick(neutralTemplates), ...pick(neutralTexts) };
   } else {
     return { mood: "bullish" as const, template: pick(bullishTemplates), ...pick(bullishTexts) };
   }
 }
 
-const { mood, template, topText, bottomText } = getMood(price);
+const { mood, template, topText, bottomText } = getMood(price, priceDelta);
 const memeUrl = `https://api.memegen.link/images/${template}/${memeEncode(topText)}/${memeEncode(bottomText)}.png`;
 
 console.log(`Mood: ${mood} | Price: $${price.toFixed(8)}`);
